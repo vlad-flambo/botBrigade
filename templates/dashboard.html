@@ -1,0 +1,165 @@
+{% extends 'base.html' %}
+{% block content %}
+<h2>Task Dashboard</h2>
+<div class="mb-3 d-flex justify-content-between align-items-center">
+  <div>
+    <form id="bulkActionsForm" action="/bulk_action" method="post" style="display:inline;">
+      <input type="hidden" name="action" id="bulkActionInput">
+      <button class="btn btn-primary me-2" type="button" onclick="submitBulkAction('run')">&#x25B6;&#xFE0F; Run</button>
+      <button class="btn btn-secondary me-2" type="button" onclick="submitBulkAction('edit')">&#x270F;&#xFE0F; Edit</button>
+      <button class="btn btn-danger me-2" type="button" onclick="submitBulkAction('delete')">&#x1F5D1;&#xFE0F; Delete</button>
+      <button class="btn btn-warning me-2" type="button" onclick="submitBulkAction('toggle')">&#x1F512;/&#x1F513; Enable/Disable</button>
+      <button class="btn btn-info me-2" type="button" onclick="submitBulkAction('logs')">&#x1F4C4; Logs</button>
+    </form>
+  </div>
+</div>
+<style>
+  .actions-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4em;
+    align-items: center;
+  }
+  .command-col {
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.95em;
+  }
+</style>
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+    {% for category, message in messages %}
+      <div class="alert alert-{{ category }}">{{ message }}</div>
+    {% endfor %}
+  {% endif %}
+{% endwith %}
+{% if error %}
+  <div class="alert alert-danger">{{ error }}</div>
+{% endif %}
+<form id="tasksTableForm" method="post">
+<table class="table table-dark table-striped">
+    <thead class="table-dark">
+        <tr>
+            <th></th>
+            <th><input type="checkbox" id="selectAll"></th>
+            <th>Name</th>
+            <th class="command-col">Command</th>
+            <th>Schedule</th>
+            <th>Status</th>
+            <th>Last Run</th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for task in tasks %}
+        <tr>
+            <td class="drag-handle" style="cursor:move; font-size:1.3em;">&#9776;</td>
+            <td><input type="checkbox" name="selected_tasks" value="{{ task.name }}" class="task-checkbox"></td>
+            <td title="{{ task.name }}">{{ task.name }}</td>
+            <td class="command-col" title="{{ task.command }}">{{ task.command }}</td>
+            <td title="{{ task.schedule }}">{{ task.schedule }}</td>
+            <td title="{{ task.status }}">{{ task.status }}</td>
+            <td title="{{ task.last_run }}">{{ task.last_run }}</td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+</form>
+<a href="/tasks" class="btn btn-success">+ Add New Task</a>
+<!-- Add SortableJS CDN -->
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
+<script>
+// Select all functionality
+const selectAll = document.getElementById('selectAll');
+const checkboxes = document.querySelectorAll('.task-checkbox');
+
+// Restore selection from localStorage
+const SELECTED_KEY = 'selected_tasks';
+function restoreSelection() {
+  const selected = JSON.parse(localStorage.getItem(SELECTED_KEY) || '[]');
+  checkboxes.forEach(cb => {
+    cb.checked = selected.includes(cb.value);
+  });
+  // Update selectAll state
+  selectAll.checked = checkboxes.length > 0 && Array.from(checkboxes).every(cb => cb.checked);
+}
+restoreSelection();
+
+// Update localStorage when a checkbox is changed
+checkboxes.forEach(cb => {
+  cb.addEventListener('change', () => {
+    const selected = Array.from(checkboxes).filter(c => c.checked).map(c => c.value);
+    localStorage.setItem(SELECTED_KEY, JSON.stringify(selected));
+    selectAll.checked = checkboxes.length > 0 && Array.from(checkboxes).every(cb => cb.checked);
+  });
+});
+selectAll.addEventListener('change', function() {
+  checkboxes.forEach(cb => cb.checked = selectAll.checked);
+  const selected = selectAll.checked ? Array.from(checkboxes).map(cb => cb.value) : [];
+  localStorage.setItem(SELECTED_KEY, JSON.stringify(selected));
+});
+
+// Drag & drop reordering with handle and confirmation
+const tbody = document.querySelector('table tbody');
+new Sortable(tbody, {
+  animation: 150,
+  handle: '.drag-handle',
+  onEnd: function (evt) {
+    const order = Array.from(tbody.querySelectorAll('tr')).map(row => {
+      return row.querySelector('input.task-checkbox').value;
+    });
+    if (evt.oldIndex !== evt.newIndex) {
+      if (!confirm('Save new task order?')) {
+        // Reload to revert
+        window.location.reload();
+        return;
+      }
+      fetch('/tasks/reorder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task_names: order })
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (!data.success) alert('Failed to save order: ' + (data.error || 'Unknown error'));
+      })
+      .catch(() => alert('Failed to save order'));
+    }
+  }
+});
+
+// Bulk action submission
+function submitBulkAction(action) {
+  const form = document.getElementById('bulkActionsForm');
+  const tableForm = document.getElementById('tasksTableForm');
+  const selected = tableForm.querySelectorAll('input[name="selected_tasks"]:checked');
+  if (selected.length === 0) {
+    alert('Please select at least one task.');
+    return;
+  }
+  if ((action === 'edit' || action === 'logs') && selected.length !== 1) {
+    alert('Please select exactly one task for this action.');
+    return;
+  }
+  if (action === 'delete') {
+    if (!confirm('Are you sure you want to delete the selected task(s)? This cannot be undone.')) {
+      return;
+    }
+  }
+  // Copy selected checkboxes to the bulk form
+  form.innerHTML = form.innerHTML.replace(/<input type="hidden" name="selected_tasks"[^>]*>/g, '');
+  selected.forEach(cb => {
+    const hidden = document.createElement('input');
+    hidden.type = 'hidden';
+    hidden.name = 'selected_tasks';
+    hidden.value = cb.value;
+    form.appendChild(hidden);
+  });
+  document.getElementById('bulkActionInput').value = action;
+  // Optionally clear selection after submit
+  localStorage.removeItem(SELECTED_KEY);
+  form.submit();
+}
+</script>
+{% endblock %} 

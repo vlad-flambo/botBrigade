@@ -1,0 +1,65 @@
+{% extends 'base.html' %}
+{% block content %}
+<h2>Logs for {{ task_name }}</h2>
+<style>
+  .log-bubble {
+    background: #23272b;
+    color: #e0e0e0;
+    border-radius: 10px;
+    margin-bottom: 1.5em;
+    padding: 1.2em 1.5em 1.2em 1.5em;
+    box-shadow: 0 2px 12px #0005;
+    border-left: 5px solid #375a7f;
+    position: relative;
+  }
+  .log-tag {
+    display: inline-block;
+    font-size: 0.95em;
+    font-weight: bold;
+    padding: 0.2em 0.8em;
+    border-radius: 1em;
+    margin-right: 1em;
+    vertical-align: middle;
+    letter-spacing: 0.5px;
+  }
+  .log-tag.oneoff {
+    background: #3498db;
+    color: #fff;
+  }
+  .log-tag.scheduled {
+    background: #9b59b6;
+    color: #fff;
+  }
+  .log-timestamp {
+    color: #00e676;
+    font-size: 1.1em;
+    font-weight: bold;
+    letter-spacing: 0.5px;
+    margin-left: 0.5em;
+    vertical-align: middle;
+  }
+  .log-header {
+    margin-bottom: 0.7em;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+</style>
+<div>
+  {% for entry in log_entries %}
+    <div class="log-bubble">
+      <div class="log-header">
+        <span class="log-tag {% if entry.type|lower == 'one-off' %}oneoff{% elif entry.type|lower == 'scheduled' %}scheduled{% endif %}">
+          {{ entry.type }}
+        </span>
+        <span class="log-timestamp">{{ entry.time }}</span>
+      </div>
+      <pre style="background:transparent; color:inherit; border:none; margin:0;">{{ entry.body.strip() }}</pre>
+    </div>
+  {% endfor %}
+  {% if not log_entries %}
+    <div class="alert alert-secondary">No logs found or no valid entries were parsed.</div>
+  {% endif %}
+</div>
+<a href="/" class="btn btn-secondary mt-3">Back to Dashboard</a>
+{% endblock %}

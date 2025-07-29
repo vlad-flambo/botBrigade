@@ -1,0 +1,175 @@
+{% extends 'base.html' %}
+{% block content %}
+<h2>{% if request.args.get('edit') %}Edit Task{% else %}Add Task{% endif %}</h2>
+<form method="post">
+    <div class="mb-3">
+        <label for="name" class="form-label">Task Name</label>
+        <input type="text" class="form-control" id="name" name="name" value="{{ task.name if task else '' }}" required>
+    </div>
+    <div class="mb-3">
+        <label for="command" class="form-label">Command/Script Path</label>
+        <input type="text" class="form-control" id="command" name="command" value="{{ task.command if task else '' }}" required>
+    </div>
+    <div class="mb-3">
+        <label class="form-label">Schedule Builder</label>
+        <div class="form-check form-check-inline">
+            <input class="form-check-input" type="radio" name="schedType" id="schedOneOff" value="oneoff">
+            <label class="form-check-label" for="schedOneOff">One-off</label>
+        </div>
+        <div class="form-check form-check-inline">
+            <input class="form-check-input" type="radio" name="schedType" id="schedRecurring" value="recurring">
+            <label class="form-check-label" for="schedRecurring">Recurring</label>
+        </div>
+        <div id="oneoffFields" class="mt-2" style="display:none;">
+            <input type="date" id="oneoffDate" class="form-control mb-2" style="max-width:200px;display:inline-block;">
+            <input type="time" id="oneoffTime" class="form-control mb-2" style="max-width:150px;display:inline-block;">
+        </div>
+        <div id="recurringFields" class="mt-2" style="display:none;">
+            <div class="mb-2">
+                <label class="form-label">Days of Week:</label><br>
+                <div class="btn-group" role="group" aria-label="Days of week">
+                    {% for day, label in [('mon','Mon'),('tue','Tue'),('wed','Wed'),('thu','Thu'),('fri','Fri'),('sat','Sat'),('sun','Sun')] %}
+                    <input type="checkbox" class="btn-check" id="dow_{{day}}" autocomplete="off" value="{{day}}">
+                    <label class="btn btn-outline-light btn-sm" for="dow_{{day}}">{{label}}</label>
+                    {% endfor %}
+                </div>
+            </div>
+            <div class="mb-2">
+                <label>Start Time:</label>
+                <input type="time" id="recStart" class="form-control" style="max-width:150px;display:inline-block;" value="09:35">
+                <label class="ms-2">End Time:</label>
+                <input type="time" id="recEnd" class="form-control" style="max-width:150px;display:inline-block;" value="18:25">
+            </div>
+            <div class="mb-2">
+                <label>Interval:</label>
+                <input type="number" id="recIntervalVal" class="form-control" style="max-width:100px;display:inline-block;" min="1" value="1">
+                <select id="recIntervalUnit" class="form-select" style="max-width:100px;display:inline-block;">
+                    <option value="m">minutes</option>
+                    <option value="h">hours</option>
+                </select>
+            </div>
+        </div>
+        <div class="form-text text-light mt-2">Or enter a custom schedule string below:</div>
+    </div>
+    <div class="mb-3">
+        <label for="schedule" class="form-label">Schedule String</label>
+        <input type="text" class="form-control" id="schedule" name="schedule" value="{{ task.schedule if task else '' }}" required>
+        <div class="form-text text-light">Preview: <span id="schedPreview"></span></div>
+    </div>
+    <div class="mb-3">
+        <label for="status" class="form-label">Status</label>
+        <select class="form-select" id="status" name="status">
+            <option value="enabled" {% if task and task.status == 'enabled' %}selected{% endif %}>Enabled</option>
+            <option value="disabled" {% if task and task.status == 'disabled' %}selected{% endif %}>Disabled</option>
+        </select>
+    </div>
+    <button type="submit" class="btn btn-primary">Save Task</button>
+    <a href="/" class="btn btn-secondary">Cancel</a>
+</form>
+<script>
+// --- Schedule Builder Logic ---
+function updateScheduleString() {
+    const schedType = document.querySelector('input[name="schedType"]:checked').value;
+    let schedStr = '';
+    if (schedType === 'oneoff') {
+        const date = document.getElementById('oneoffDate').value;
+        const time = document.getElementById('oneoffTime').value;
+        if (date && time) {
+            schedStr = `${date} ${time}`;
+        }
+    } else {
+        // Recurring
+        let days = [];
+        document.querySelectorAll('input[id^="dow_"]:checked').forEach(cb => days.push(cb.value));
+        const start = document.getElementById('recStart').value;
+        const end = document.getElementById('recEnd').value;
+        const intervalVal = document.getElementById('recIntervalVal').value;
+        const intervalUnit = document.getElementById('recIntervalUnit').value;
+        if (days.length && start && end && intervalVal) {
+            let dayStr = days.length === 5 && days.every(d=>['mon','tue','wed','thu','fri'].includes(d)) ? 'weekdays' : days.join(',');
+            schedStr = `${dayStr}:${start}-${end}:${intervalVal}${intervalUnit}`;
+        }
+    }
+    document.getElementById('schedule').value = schedStr;
+    document.getElementById('schedPreview').textContent = schedStr;
+}
+
+document.getElementById('schedOneOff').addEventListener('change', function() {
+    document.getElementById('oneoffFields').style.display = 'block';
+    document.getElementById('recurringFields').style.display = 'none';
+    updateScheduleString();
+});
+document.getElementById('schedRecurring').addEventListener('change', function() {
+    document.getElementById('oneoffFields').style.display = 'none';
+    document.getElementById('recurringFields').style.display = 'block';
+    updateScheduleString();
+});
+['oneoffDate','oneoffTime','recStart','recEnd','recIntervalVal','recIntervalUnit'].forEach(id => {
+    document.getElementById(id).addEventListener('input', updateScheduleString);
+});
+document.querySelectorAll('input[id^="dow_"]').forEach(cb => {
+    cb.addEventListener('change', updateScheduleString);
+});
+// Sync manual edits
+const schedInput = document.getElementById('schedule');
+schedInput.addEventListener('input', function() {
+    document.getElementById('schedPreview').textContent = schedInput.value;
+});
+// On page load, set preview and pre-fill if editing
+window.addEventListener('DOMContentLoaded', function() {
+    const schedVal = document.getElementById('schedule').value;
+    if (schedVal) {
+        // Try to parse the schedule string
+        let matched = false;
+        // One-off: YYYY-MM-DD HH:MM
+        const oneoffMatch = schedVal.match(/^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2})$/);
+        if (oneoffMatch) {
+            document.getElementById('schedOneOff').checked = true;
+            document.getElementById('oneoffFields').style.display = 'block';
+            document.getElementById('recurringFields').style.display = 'none';
+            document.getElementById('oneoffDate').value = oneoffMatch[1];
+            document.getElementById('oneoffTime').value = oneoffMatch[2];
+            matched = true;
+        } else {
+            // Recurring: days:start-end:interval
+            const recMatch = schedVal.match(/^([a-z,]+|weekdays):(\d{2}:\d{2})-(\d{2}:\d{2}):(\d+)([mh])$/);
+            if (recMatch) {
+                document.getElementById('schedRecurring').checked = true;
+                document.getElementById('oneoffFields').style.display = 'none';
+                document.getElementById('recurringFields').style.display = 'block';
+                // Days
+                let days = recMatch[1] === 'weekdays' ? ['mon','tue','wed','thu','fri'] : recMatch[1].split(',');
+                document.querySelectorAll('input[id^="dow_"]').forEach(cb => {
+                    cb.checked = days.includes(cb.value);
+                });
+                // Times
+                document.getElementById('recStart').value = recMatch[2];
+                document.getElementById('recEnd').value = recMatch[3];
+                // Interval
+                document.getElementById('recIntervalVal').value = recMatch[4];
+                document.getElementById('recIntervalUnit').value = recMatch[5];
+                matched = true;
+            }
+        }
+        if (!matched) {
+            // Fallback: default to recurring
+            document.getElementById('schedRecurring').checked = true;
+            document.getElementById('oneoffFields').style.display = 'none';
+            document.getElementById('recurringFields').style.display = 'block';
+        }
+    } else {
+        // Default: recurring, mon-fri checked, 1h interval
+        document.getElementById('schedRecurring').checked = true;
+        document.getElementById('oneoffFields').style.display = 'none';
+        document.getElementById('recurringFields').style.display = 'block';
+        // Check mon-fri
+        ['mon','tue','wed','thu','fri'].forEach(function(day) {
+            document.getElementById('dow_' + day).checked = true;
+        });
+        document.getElementById('recIntervalVal').value = '1';
+        document.getElementById('recIntervalUnit').value = 'h';
+    }
+    updateScheduleString();
+});
+</script>
+{% endblock %} 
